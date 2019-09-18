@@ -11,6 +11,7 @@ import database
 
 def get_news():
     clean_db()
+    check_new_receiver()
     url = "https://www.fh-dortmund.de/display"
     r = requests.get(url)
     page = BeautifulSoup(r.text, "html.parser")  # Parse html response and store it in the beautifulsoup format
@@ -24,6 +25,26 @@ def clean_db():
         delta = i[1] - datetime.today().date()
         if delta.days <= -14:
             db.run_query("DELETE FROM news WHERE checksum = '{}'".format(i[0]))
+
+
+def check_new_receiver():
+    url = "https://api.telegram.org/bot{}/getUpdates".format(config['bot'])
+    r = requests.get(url)
+    res = r.json()
+
+    if not res:
+        return
+
+    receiver_list = db.run_select_query("SELECT id FROM users;")
+    for item in res['result']:
+        text = item['message']['text']
+        if text == "/abonnieren":
+            sender_id = item['message']['from']['id']
+            if sender_id not in receiver_list:
+                sender = item['message']['from']['first_name']
+                db.run_query("INSERT INTO users (id, name) VALUES ('{}', '{}')".format(sender_id, sender))
+                payload = {'text': "Erfolgreich abonniert!", 'chat_id': sender_id}
+                requests.get("https://api.telegram.org/bot{}/sendMessage".format(config['bot']), params=payload)
 
 
 def process_page(soup):
