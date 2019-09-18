@@ -2,8 +2,8 @@ import configparser
 import hashlib
 from datetime import datetime
 from urllib.parse import quote_plus
-from urllib.request import urlopen
 
+import requests
 from bs4 import BeautifulSoup
 
 import database
@@ -11,10 +11,10 @@ import database
 
 def get_news():
     clean_db()
-    fhdo_url = "https://www.fh-dortmund.de/display"
-    page = urlopen(fhdo_url)  # Query the website and return the html response
-    parsed_page = BeautifulSoup(page, "html.parser")  # Parse html response and store it in the beautifulsoup format
-    process_page(parsed_page)
+    url = "https://www.fh-dortmund.de/display"
+    r = requests.get(url)
+    page = BeautifulSoup(r.text, "html.parser")  # Parse html response and store it in the beautifulsoup format
+    process_page(page)
 
 
 def clean_db():
@@ -52,8 +52,9 @@ def send_telegram_message(header, content):
 
     for receiver in receiver_list:
         message = quote_plus(header + '\n' + content)  # Encode message
-        url = "https://api.telegram.org/bot{}/sendMessage?text={}&chat_id={}".format(config['bot'], message, receiver)
-        urlopen(url)
+        url = "https://api.telegram.org/bot{}/sendMessage".format(config['bot'])
+        payload = {'text': message, 'chat_id': receiver}
+        requests.get(url, params=payload)
 
 
 def read_configfile(filename):
