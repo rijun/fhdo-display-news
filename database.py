@@ -19,7 +19,7 @@ class DatabaseHandler:
                 return_result.append(result)
         return return_result
 
-    def run_query(self, query):
+    def run_query(self, query, *args):
         """ Run a SQL query. """
-        self.cursor.execute(query)
+        self.cursor.execute(query, args)
         self.connection.commit()

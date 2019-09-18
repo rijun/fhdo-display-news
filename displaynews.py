@@ -24,7 +24,7 @@ def clean_db():
     for i in entries:
         delta = i[1] - datetime.today().date()
         if delta.days <= -14:
-            db.run_query("DELETE FROM news WHERE checksum = '{}'".format(i[0]))
+            db.run_query("DELETE FROM news WHERE checksum = %s", i[0])
 
 
 def check_new_receiver():
@@ -42,7 +42,7 @@ def check_new_receiver():
             sender_id = item['message']['from']['id']
             if sender_id not in receiver_list:
                 sender = item['message']['from']['first_name']
-                db.run_query("INSERT INTO users (id, name) VALUES ('{}', '{}')".format(sender_id, sender))
+                db.run_query("INSERT INTO users (id, name) VALUES (%s, %s)", sender_id, sender)
                 payload = {'text': "Erfolgreich abonniert!", 'chat_id': sender_id}
                 requests.get("https://api.telegram.org/bot{}/sendMessage".format(config['bot']), params=payload)
 
@@ -60,9 +60,8 @@ def process_page(soup):
 
             # Forward and store news only if there are no duplicates
             if checksum not in checksum_list:
-                db.run_query("INSERT INTO news (checksum, title, content, date) "
-                             "VALUES ('{0}', '{1}', '{2}', '{3}')"
-                             .format(checksum, title, data, datetime.today().date()))
+                db.run_query("INSERT INTO news (checksum, title, content, date) VALUES (%s, %s, %s, %s)",
+                             checksum, title, data, datetime.today().date())
                 send_telegram_message(title, data)
 
         news_title = news_title.find_next(class_="newsHeadline")  # Find next headline
