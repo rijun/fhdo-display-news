@@ -52,7 +52,7 @@ def process_page(soup):
 
     news_title = soup.find(class_="newsHeadline")  # Find first news headline
 
-    while not (news_title is None):  # Search for content until every headline is processed
+    while news_title is not None:  # Search for content until every headline is processed
         if "FB 3" in news_title.string or "Studienbüro" in news_title.string:  # Sort out every non-relevent headline
             title = news_title.string
             data = news_title.find_next(class_="indent").string  # Next sibling after headline stores the news content
@@ -61,7 +61,7 @@ def process_page(soup):
             # Forward and store news only if there are no duplicates
             if checksum not in checksum_list:
                 db.run_query("INSERT INTO news (checksum, title, content, date) VALUES (%s, %s, %s, %s)",
-                             checksum, title, data, datetime.today().date())
+                             checksum, str(title), str(data), datetime.today().date())
                 send_telegram_message(title, data)
 
         news_title = news_title.find_next(class_="newsHeadline")  # Find next headline
