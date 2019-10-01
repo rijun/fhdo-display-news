@@ -1,7 +1,6 @@
 import configparser
 import hashlib
 from datetime import datetime
-from urllib.parse import quote_plus
 
 import requests
 from bs4 import BeautifulSoup
@@ -71,7 +70,7 @@ def send_telegram_message(header, content):
     receiver_list = db.run_select_query("SELECT id FROM users;")
 
     for receiver in receiver_list:
-        message = quote_plus(header + '\n' + content)  # Encode message
+        message = header + '\n' + content
         url = "https://api.telegram.org/bot{}/sendMessage".format(config['bot'])
         payload = {'text': message, 'chat_id': receiver}
         requests.get(url, params=payload)
