@@ -1,9 +1,12 @@
-import mysql.connector as mariadb
+import pymysql
 
 
 class DatabaseHandler:
     def __init__(self, user, password, database):
-        self.connection = mariadb.connect(user=user, password=password, database=database)
+        try:
+            self.connection = pymysql.connect(user=user, password=password, database=database)
+        except pymysql.err.OperationalError:
+            exit(1)
         self.cursor = self.connection.cursor()
 
     def run_select_query(self, query):
@@ -13,7 +16,7 @@ class DatabaseHandler:
         # Clean SQL result because a single result tuple entry contains an extra space
         return_result = []
         for result in self.cursor.fetchall():
-            if len(result) is 1:
+            if len(result) == 1:
                 return_result.append(result[0])
             else:
                 return_result.append(result)

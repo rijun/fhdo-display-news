@@ -1,9 +1,14 @@
 import configparser
 import hashlib
 from datetime import datetime
+from urllib.parse import quote_plus
 
-import requests
-from bs4 import BeautifulSoup
+try:
+    import requests
+    from bs4 import BeautifulSoup
+except Exception as e:
+    print(e)
+    exit()   
 
 import database
 
@@ -12,7 +17,10 @@ def get_news():
     clean_db()
     check_new_receiver()
     url = "https://www.fh-dortmund.de/display"
-    r = requests.get(url)
+    try:
+        r = requests.get(url)
+    except TimeoutError:
+        exit(2)
     page = BeautifulSoup(r.text, "html.parser")  # Parse html response and store it in the beautifulsoup format
     process_page(page)
 
