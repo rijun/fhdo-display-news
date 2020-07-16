@@ -1,28 +1,25 @@
-import configparser
 import hashlib
+import sys
 from datetime import datetime
-from urllib.parse import quote_plus
 
-try:
-    import requests
-    from bs4 import BeautifulSoup
-except Exception as e:
-    print(e)
-    exit()   
+import requests
+from bs4 import BeautifulSoup
 
 import database
+import config
+
+conf = config.Config()
+conf.debug = True if '-d' in sys.argv else False
+
+if not conf.debug:
+    db = database.DatabaseHandler(conf.sql_user, conf.sql_pass, conf.sql_db)
 
 
-def get_news():
-    clean_db()
-    check_new_receiver()
-    url = "https://www.fh-dortmund.de/display"
-    try:
-        r = requests.get(url)
-    except TimeoutError:
-        exit(2)
-    page = BeautifulSoup(r.text, "html.parser")  # Parse html response and store it in the beautifulsoup format
-    process_page(page)
+def main():
+    if not conf.debug:
+        clean_db()
+        check_new_receiver()
+    get_news()
 
 
 def clean_db():
@@ -35,7 +32,7 @@ def clean_db():
 
 
 def check_new_receiver():
-    url = "https://api.telegram.org/bot{}/getUpdates".format(config['bot'])
+    url = "https://api.telegram.org/bot{}/getUpdates".format(conf.bot_token)
     r = requests.get(url)
     res = r.json()
 
@@ -54,8 +51,33 @@ def check_new_receiver():
                 requests.get("https://api.telegram.org/bot{}/sendMessage".format(config['bot']), params=payload)
 
 
-def process_page(soup):
-    checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news")]
+def get_news():
+    process_display_news()
+    process_current_et_news()
+
+
+def get_page_contents(url):
+    r = None
+    try:
+        r = requests.get(url)
+    except TimeoutError:
+        return None
+    except requests.exceptions.ConnectionError:
+        return None
+    if r is None:
+        return None
+    page = BeautifulSoup(r.text, "html.parser")  # Parse html response and store it in the beautifulsoup format
+    return page
+
+
+def process_display_news():
+    soup = get_page_contents("https://www.fh-dortmund.de/display")
+
+    if soup is None:
+        return
+
+    if not conf.debug:
+        checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news")]
 
     news_title = soup.find(class_="newsHeadline")  # Find first news headline
 
@@ -66,37 +88,57 @@ def process_page(soup):
             checksum = hashlib.md5((title + data).encode('utf-8')).hexdigest()
 
             # Forward and store news only if there are no duplicates
-            if checksum not in checksum_list:
+            if conf.debug is False and checksum not in checksum_list:
                 db.run_query("INSERT INTO news (checksum, title, content, date) VALUES (%s, %s, %s, %s)",
                              checksum, str(title), str(data), datetime.today().date())
-                send_telegram_message(title, data)
+                send_telegram_message("DISPLAYNACHRICHT", title, data)
 
         news_title = news_title.find_next(class_="newsHeadline")  # Find next headline
 
 
-def send_telegram_message(header, content):
+def process_current_et_news():
+    soup = get_page_contents("https://www.fh-dortmund.de/de/fb/3/studiengaenge/et/aktuelles/index.php")
+
+    if soup is None:
+        return
+
+    if not conf.debug:
+        checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news")]
+
+    news_title = soup.find('h2')  # Find first news headline
+
+    while news_title is not None:  # Search for content until every headline is processed
+        for p in news_title.parents:
+            if p.has_attr('id') and p['id'] == 'footer':
+                return
+
+        title = news_title.string.strip()
+        # data = ""  # Next sibling after headline stores the news content
+        # for c in news_title.find_next('td').children:
+        #     if c.name == 'p':
+        #         data += c.text
+        # print(data)
+        checksum = hashlib.md5((title).encode('utf-8')).hexdigest()
+        print(title)
+
+        # Forward and store news only if there are no duplicates
+        if conf.debug is False and checksum not in checksum_list:
+            db.run_query("INSERT INTO news (checksum, title, content, date) VALUES (%s, %s, %s, %s)",
+                         checksum, str(title), "", datetime.today().date())
+            send_telegram_message("AKTUELLES ET", title, "")
+
+        news_title = news_title.find_next('h2')  # Find next headline
+
+
+def send_telegram_message(source, header, content):
     receiver_list = db.run_select_query("SELECT id FROM users;")
 
     for receiver in receiver_list:
-        message = header + '\n' + content
+        message = source + '\n' + header + '\n' + content
         url = "https://api.telegram.org/bot{}/sendMessage".format(config['bot'])
         payload = {'text': message, 'chat_id': receiver}
         requests.get(url, params=payload)
 
 
-def read_configfile(filename):
-    c = configparser.ConfigParser()
-    c.read(filename)
-    configuration = {
-        "sql_user": c['sql']['user'],
-        "sql_pass": c['sql']['passwd'],
-        "sql_db": c['sql']['db'],
-        "bot": c['bot']['token']
-    }
-    return configuration
-
-
 if __name__ == '__main__':
-    config = read_configfile("config.ini")
-    db = database.DatabaseHandler(config['sql_user'], config['sql_pass'], config['sql_db'])
-    get_news()
+    main()
