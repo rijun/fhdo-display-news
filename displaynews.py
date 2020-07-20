@@ -11,8 +11,7 @@ import config
 conf = config.Config()
 conf.debug = True if '-d' in sys.argv else False
 
-if not conf.debug:
-    db = database.DatabaseHandler(conf.sql_user, conf.sql_pass, conf.sql_db)
+db = database.DatabaseHandler(conf.sql_user, conf.sql_pass, conf.sql_db)
 
 
 def main():
@@ -48,7 +47,7 @@ def check_new_receiver():
                 sender = item['message']['from']['first_name']
                 db.run_query("INSERT INTO users (id, name) VALUES (%s, %s)", sender_id, sender)
                 payload = {'text': "Erfolgreich abonniert!", 'chat_id': sender_id}
-                requests.get("https://api.telegram.org/bot{}/sendMessage".format(config['bot']), params=payload)
+                requests.get("https://api.telegram.org/bot{}/sendMessage".format(conf.bot_token), params=payload)
 
 
 def get_news():
@@ -76,8 +75,8 @@ def process_display_news():
     if soup is None:
         return
 
-    if not conf.debug:
-        checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news")]
+    checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news "
+                                                       "WHERE type = 'DISPLAYNACHRICHT'")]
 
     news_title = soup.find(class_="newsHeadline")  # Find first news headline
 
@@ -88,7 +87,7 @@ def process_display_news():
             checksum = hashlib.md5((title + data).encode('utf-8')).hexdigest()
 
             # Forward and store news only if there are no duplicates
-            if conf.debug is False and checksum not in checksum_list:
+            if checksum not in checksum_list:
                 db.run_query("INSERT INTO news (checksum, title, content, date) VALUES (%s, %s, %s, %s)",
                              checksum, str(title), str(data), datetime.today().date())
                 send_telegram_message("DISPLAYNACHRICHT", title, data)
@@ -102,8 +101,8 @@ def process_current_et_news():
     if soup is None:
         return
 
-    if not conf.debug:
-        checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news")]
+    checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news "
+                                                       "WHERE type = 'AKTUELLES ET'")]
 
     news_title = soup.find('h2')  # Find first news headline
 
@@ -118,11 +117,10 @@ def process_current_et_news():
         #     if c.name == 'p':
         #         data += c.text
         # print(data)
-        checksum = hashlib.md5((title).encode('utf-8')).hexdigest()
-        print(title)
+        checksum = hashlib.md5(title.encode('utf-8')).hexdigest()
 
         # Forward and store news only if there are no duplicates
-        if conf.debug is False and checksum not in checksum_list:
+        if checksum not in checksum_list:
             db.run_query("INSERT INTO news (checksum, title, content, date) VALUES (%s, %s, %s, %s)",
                          checksum, str(title), "", datetime.today().date())
             send_telegram_message("AKTUELLES ET", title, "")
@@ -131,11 +129,18 @@ def process_current_et_news():
 
 
 def send_telegram_message(source, header, content):
-    receiver_list = db.run_select_query("SELECT id FROM users;")
+    if conf.debug:
+        query = "SELECT id FROM users WHERE debug = 1;"
+    else:
+        query = "SELECT id FROM users;"
+    receiver_list = db.run_select_query(query)
+
+    print(query)
+    input()
 
     for receiver in receiver_list:
         message = source + '\n' + header + '\n' + content
-        url = "https://api.telegram.org/bot{}/sendMessage".format(config['bot'])
+        url = "https://api.telegram.org/bot{}/sendMessage".format(conf.bot_token)
         payload = {'text': message, 'chat_id': receiver}
         requests.get(url, params=payload)
 
