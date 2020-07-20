@@ -88,9 +88,9 @@ def process_display_news():
 
             # Forward and store news only if there are no duplicates
             if checksum not in checksum_list:
-                db.run_query("INSERT INTO news (checksum, title, content, date) VALUES (%s, %s, %s, %s)",
-                             checksum, str(title), str(data), datetime.today().date())
-                send_telegram_message("DISPLAYNACHRICHT", title, data)
+                db.run_query("INSERT INTO news (checksum, title, content, date, type) VALUES (%s, %s, %s, %s, %s)",
+                             checksum, str(title), str(data), datetime.today().date(), "DISPLAYNACHRICHT")
+                send_telegram_message("**** DISPLAYNACHRICHT ****\n", title, data)
 
         news_title = news_title.find_next(class_="newsHeadline")  # Find next headline
 
@@ -121,22 +121,19 @@ def process_current_et_news():
 
         # Forward and store news only if there are no duplicates
         if checksum not in checksum_list:
-            db.run_query("INSERT INTO news (checksum, title, content, date) VALUES (%s, %s, %s, %s)",
-                         checksum, str(title), "", datetime.today().date())
-            send_telegram_message("AKTUELLES ET", title, "")
+            db.run_query("INSERT INTO news (checksum, title, content, date, type) VALUES (%s, %s, %s, %s, %s)",
+                         checksum, str(title), "", datetime.today().date(), "AKTUELLES ET")
+            send_telegram_message("**** AKTUELLES ET ****\n", title)
 
         news_title = news_title.find_next('h2')  # Find next headline
 
 
-def send_telegram_message(source, header, content):
+def send_telegram_message(source, header, content=""):
     if conf.debug:
         query = "SELECT id FROM users WHERE debug = 1;"
     else:
         query = "SELECT id FROM users;"
     receiver_list = db.run_select_query(query)
-
-    print(query)
-    input()
 
     for receiver in receiver_list:
         message = source + '\n' + header + '\n' + content
