@@ -5,7 +5,7 @@ import os
 class Config:
     def __init__(self):
         c = configparser.ConfigParser()
-        config_file = os.path.join(os.path.dirname(__file__), "config.ini")
+        config_file = os.path.join("../config.ini")
         c.read(config_file)
         self.sql_user = c['sql']['user']
         self.sql_pass = c['sql']['passwd']
