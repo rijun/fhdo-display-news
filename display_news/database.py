@@ -1,12 +1,16 @@
-import pymysql
+import sys
+import logging
+
+import mariadb
 
 
 class DatabaseHandler:
     def __init__(self, user, password, database):
         try:
-            self.connection = pymysql.connect(user=user, password=password, database=database)
-        except pymysql.err.OperationalError:
-            exit(1)
+            self.connection = mariadb.connect(user=user, password=password, database=database)
+        except mariadb.Error as e:
+            logging.error(f"Error connecting to MariaDB Platform: {e}")
+            sys.exit(1)
         self.cursor = self.connection.cursor()
 
     def run_select_query(self, query):
