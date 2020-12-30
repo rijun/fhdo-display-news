@@ -5,16 +5,17 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
-from display_news import config, database
+from display_news import config
+from display_news.parsers import current_news, display_news
 
-conf = config.Config()
-conf.debug = True if '-d' in sys.argv else False
+# conf = config.Config()
 
 # db = database.DatabaseHandler(conf.sql_user, conf.sql_pass, conf.sql_db)
 
 
-def main():
-    if not conf.debug:
+def main(dry_run=False):
+    if not dry_run:
+        from display_news import database
         clean_db()
         check_new_receiver()
     get_news()
@@ -50,8 +51,29 @@ def check_new_receiver():
 
 
 def get_news():
-    process_display_news()
-    process_current_et_news()
+    # checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news "
+    #                                                    "WHERE type = 'DISPLAYNACHRICHT'")]
+
+    dn_data = display_news.parse(get_page_contents("https://www.fh-dortmund.de/display"))
+    print(dn_data)
+
+    # Forward and store news only if there are no duplicates
+    # if checksum not in checksum_list:
+    #     db.run_query("INSERT INTO news (checksum, title, content, date, type) VALUES (%s, %s, %s, %s, %s)",
+    #                  checksum, str(title), str(data), datetime.today().date(), "DISPLAYNACHRICHT")
+    #     send_telegram_message("**** DISPLAYNACHRICHT ****\n", title, data)
+
+    cn_data = display_news.parse(get_page_contents("https://www.fh-dortmund.de/de/fb/3/studiengaenge/et/aktuelles"
+                                                   "/index.php"))
+    print(cn_data)
+
+    # Forward and store news only if there are no duplicates
+    # if checksum not in checksum_list:
+    #     db.run_query("INSERT INTO news (checksum, title, content, date, type) VALUES (%s, %s, %s, %s, %s)",
+    #                  checksum, str(title), "", datetime.today().date(), "AKTUELLES ET")
+    #     send_telegram_message("**** AKTUELLES ET ****\n", title)
+
+    # checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news WHERE type = 'AKTUELLES ET'")]
 
 
 def get_page_contents(url):
@@ -65,87 +87,6 @@ def get_page_contents(url):
         return None
     page = BeautifulSoup(r.text, "html.parser")  # Parse html response and store it in the beautifulsoup format
     return page
-
-
-def process_display_news():
-    soup = get_page_contents("https://www.fh-dortmund.de/display")
-
-    if soup is None:
-        return
-
-    # checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news "
-    #                                                    "WHERE type = 'DISPLAYNACHRICHT'")]
-
-    news = parse_display_news(soup)
-    print(news)
-    return
-
-    # Forward and store news only if there are no duplicates
-    if checksum not in checksum_list:
-        db.run_query("INSERT INTO news (checksum, title, content, date, type) VALUES (%s, %s, %s, %s, %s)",
-                     checksum, str(title), str(data), datetime.today().date(), "DISPLAYNACHRICHT")
-        send_telegram_message("**** DISPLAYNACHRICHT ****\n", title, data)
-
-
-def process_current_et_news():
-    soup = get_page_contents("https://www.fh-dortmund.de/de/fb/3/studiengaenge/et/aktuelles/index.php")
-
-    if soup is None:
-        return
-
-    news = parse_et_news(soup)
-    print(news)
-
-    return
-
-    # Forward and store news only if there are no duplicates
-    if checksum not in checksum_list:
-        db.run_query("INSERT INTO news (checksum, title, content, date, type) VALUES (%s, %s, %s, %s, %s)",
-                     checksum, str(title), "", datetime.today().date(), "AKTUELLES ET")
-        send_telegram_message("**** AKTUELLES ET ****\n", title)
-
-    # checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news WHERE type = 'AKTUELLES ET'")]
-
-
-def parse_display_news(data: BeautifulSoup):
-    news = []
-
-    news_title = data.find(class_="newsHeadline")  # Find first news headline
-    while news_title is not None:  # Search for content until every headline is processed
-        title = news_title.string
-        data = news_title.find_next(class_="indent").string  # Next sibling after headline stores the news content
-        checksum = hashlib.md5((title + data).encode('utf-8')).hexdigest()
-        news.append({
-            'checksum': checksum,
-            'title': title,
-            'data': data
-        })
-        news_title = news_title.find_next(class_="newsHeadline")  # Find next headline
-
-    return news
-
-
-def parse_et_news(data: BeautifulSoup):
-    news = []
-
-    news_title = data.find(class_="article float-break")    # Find first news headline
-
-    while news_title is not None:  # Search for content until every headline is processed
-        for p in news_title.parents:
-            if p.has_attr('id') and p['id'] == 'footer':
-                return
-
-        title = news_title.string.strip()
-        # data = ""  # Next sibling after headline stores the news content
-        # for c in news_title.find_next('td').children:
-        #     if c.name == 'p':
-        #         data += c.text
-        # print(data)
-        checksum = hashlib.md5(title.encode('utf-8')).hexdigest()
-
-        news_title = news_title.find_next('h2')  # Find next headline
-
-    return news
 
 
 def send_telegram_message(source, header, content=""):
@@ -163,4 +104,5 @@ def send_telegram_message(source, header, content=""):
 
 
 if __name__ == '__main__':
-    main()
+    dr = True if '--dry_run' in sys.argv else False
+    main(dry_run=dr)
