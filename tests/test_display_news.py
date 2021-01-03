@@ -15,7 +15,7 @@ class TestDisplayNews(TestCase):
         data = display_news.parse(self.file_data)
         with open("files/display_news.json", 'r') as f:
             test_data = json.load(f)
-        self.assertEqual(len(data), len(test_data))
+        self.assertEqual(len(test_data), len(data))
         for i, d in enumerate(data):
             self.assertEqual(test_data[i]['title'], d['title'])
             self.assertEqual(test_data[i]['content'], d['content'])
