@@ -2,27 +2,48 @@ import hashlib
 
 from bs4 import BeautifulSoup
 
+from . import format_text
+
 
 def parse(data: BeautifulSoup) -> list:
     if data is None:
         return []
 
     news = []
-    news_title = data.find(class_="article float-break")    # Find first news headline
 
-    while news_title is not None:  # Search for content until every headline is processed
-        for p in news_title.parents:
-            if p.has_attr('id') and p['id'] == 'footer':
-                return
-
-        title = news_title.string.strip()
-        # data = ""  # Next sibling after headline stores the news content
-        # for c in news_title.find_next('td').children:
-        #     if c.name == 'p':
-        #         data += c.text
-        # print(data)
-        checksum = hashlib.md5(title.encode('utf-8')).hexdigest()
-
-        news_title = news_title.find_next('h2')  # Find next headline
+    for article in data.find_all(class_="article float-break"):
+        title = format_text(article.previous_sibling.previous_sibling.text)
+        raw_text = article.find(class_="text")
+        date = ""
+        content_list = []
+        for i, child in enumerate(raw_text.children):
+            if child == '\n':
+                continue
+            if not date and child.name == 'p':
+                date = format_text(child.get_text())
+                continue
+            elif child.name == 'p':
+                content_list.append(format_text(child.get_text().strip()))
+            elif child.name == 'ul':
+                for list_item in child.children:
+                    if not list_item == '\n':
+                        content_list.append(f"- {format_text(list_item.get_text())}")
+            elif child.name == 'table':
+                for table_row in child.tbody.children:
+                    if table_row.name != 'tr':
+                        continue
+                    for table_data in table_row.children:
+                        if table_data.name != 'td':
+                            continue
+                        for paragraph in table_data.children:
+                            if not paragraph == '\n':
+                                content_list.append(format_text(paragraph.get_text()))
+        content = '\n'.join(content_list).strip()
+        news.append({
+            'hash': hashlib.md5((title + content).encode('utf-8')).hexdigest(),
+            'date': date,
+            'title': title,
+            'content': content
+        })
 
     return news
