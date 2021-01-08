@@ -55,7 +55,6 @@ def get_news():
     #                                                    "WHERE type = 'DISPLAYNACHRICHT'")]
 
     dn_data = display_news.parse(get_page_contents("https://www.fh-dortmund.de/display"))
-    print(dn_data)
 
     # Forward and store news only if there are no duplicates
     # if checksum not in checksum_list:
@@ -63,15 +62,18 @@ def get_news():
     #                  checksum, str(title), str(data), datetime.today().date(), "DISPLAYNACHRICHT")
     #     send_telegram_message("**** DISPLAYNACHRICHT ****\n", title, data)
 
-    cn_data = display_news.parse(get_page_contents("https://www.fh-dortmund.de/de/fb/3/studiengaenge/et/aktuelles"
+    cn_data = current_news.parse(get_page_contents("https://www.fh-dortmund.de/de/fb/3/studiengaenge/et/aktuelles"
                                                    "/index.php"))
-    print(cn_data)
+
+    for data in cn_data:
+        send_telegram_message("---Aktuelles ET ---", data['title'], data['content'])
 
     # Forward and store news only if there are no duplicates
     # if checksum not in checksum_list:
     #     db.run_query("INSERT INTO news (checksum, title, content, date, type) VALUES (%s, %s, %s, %s, %s)",
     #                  checksum, str(title), "", datetime.today().date(), "AKTUELLES ET")
     #     send_telegram_message("**** AKTUELLES ET ****\n", title)
+
 
     # checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news WHERE type = 'AKTUELLES ET'")]
 
@@ -83,6 +85,8 @@ def get_page_contents(url):
         return None
     except requests.exceptions.ConnectionError:
         return None
+    except Exception as e:
+        print(e)
     if r is None:
         return None
     page = BeautifulSoup(r.text, "html.parser")  # Parse html response and store it in the beautifulsoup format

@@ -26,7 +26,7 @@ def parse(data: BeautifulSoup) -> list:
                 content_list.append(format_text(child.get_text().strip()))
             elif child.name == 'ul':
                 for list_item in child.children:
-                    if not list_item == '\n':
+                    if list_item.name is not None:
                         content_list.append(f"- {format_text(list_item.get_text())}")
             elif child.name == 'table':
                 for table_row in child.tbody.children:
@@ -36,7 +36,7 @@ def parse(data: BeautifulSoup) -> list:
                         if table_data.name != 'td':
                             continue
                         for paragraph in table_data.children:
-                            if not paragraph == '\n':
+                            if paragraph.name is not None:
                                 content_list.append(format_text(paragraph.get_text()))
         content = '\n'.join(content_list).strip()
         news.append({
