@@ -1,33 +1,123 @@
-import hashlib
 import sys
 from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
+from sqlalchemy import create_engine, MetaData, Table, Column, String, and_
+from sqlalchemy.engine.base import Connection, Engine
+from sqlalchemy.sql import select, insert, delete
 
 from display_news import config
 from display_news.parsers import current_news, display_news
 
+
 # conf = config.Config()
 
-# db = database.DatabaseHandler(conf.sql_user, conf.sql_pass, conf.sql_db)
+meta = MetaData()
+engine: Engine
+news: Table
+users: Table
 
 
-def main(dry_run=False):
-    if not dry_run:
-        from display_news import database
-        clean_db()
-        check_new_receiver()
-    get_news()
+def main(use_sqlite=False, bot_token=None):
+    global engine
+    global news
+    global users
+
+    if use_sqlite:
+        engine = create_engine('sqlite:///database.db', echo=True)
+        news = Table('news', meta,
+                     Column('hash', String),
+                     Column('news_date', String),
+                     Column('title', String),
+                     Column('content', String),
+                     Column('news_type', String)
+                     )
+        users = Table('users', meta,
+                      Column('id', String),
+                      Column('name', String),
+                      Column('debug', String)
+                      )
+        meta.create_all(engine)
+    else:
+        engine = create_engine()
+        news = Table('news', meta, autoload=True, autoload_with=engine)
+        users = Table('users', meta, autoload=True, autoload_with=engine)
+
+    conn = engine.connect()
+
+    # check_new_receiver()
+
+    dn_url = "https://www.fh-dortmund.de/display"
+    cn_url = "https://www.fh-dortmund.de/de/fb/3/studiengaenge/et/aktuelles/index.php"
+
+    dn = display_news.parse(get_page_contents(dn_url))
+    cn = current_news.parse(get_page_contents(cn_url))
+
+    dn_filtered = filter_news(conn, dn, 'display')
+    cn_filtered = filter_news(conn, cn, 'current')
+
+    store_news(conn, dn_filtered, 'display')
+    store_news(conn, cn_filtered, 'current')
+
+    forward_message(conn, bot_token, dn_filtered, 'display')
+    forward_message(conn, bot_token, cn_filtered, 'current')
+
+    clean_db(conn, dn, 'display')
+    clean_db(conn, cn, 'current')
 
 
-def clean_db():
-    entries = db.run_select_query("SELECT checksum, date FROM news")
-    # Delete any entry older than 2 weeks
-    for i in entries:
-        delta = i[1] - datetime.today().date()
-        if delta.days <= -14:
-            db.run_query("DELETE FROM news WHERE checksum = %s", i[0])
+def get_page_contents(url):
+    r = None
+    try:
+        r = requests.get(url)
+    except TimeoutError:
+        return
+    except requests.exceptions.ConnectionError:
+        return
+    except Exception as e:
+        print(e)
+    if r is None:
+        return
+    page = BeautifulSoup(r.text, "html.parser")
+    return page
+
+
+def filter_news(connection: Connection, news_list: list, news_type: str) -> list:
+    s = select([news.c.hash]).where(news.c.news_type == news_type)
+    news_in_db = [i[0] for i in connection.execute(s)]
+    filtered_news = [i for i in news_list if i['hash'] not in news_in_db]
+    return filtered_news
+
+
+def store_news(connection: Connection, news_list: list, news_type: str):
+    for n in news_list:
+        ins = news.insert().values(
+            hash=n['hash'],
+            news_date=n['date'],
+            title=n['title'],
+            content=n['content'],
+            news_type=news_type
+        )
+        connection.execute(ins)
+
+
+def forward_message(connection: Connection, bot_token: str, news_list: list, news_type: str, debug=False):
+    if debug:
+        q = select([users.c.id]).where(users.c.debug == 1)
+    else:
+        q = select([users.c.id])
+
+    receivers = connection.execute(q).fetchall()
+    send_telegram_message(bot_token, receivers, news_list, news_type)
+
+
+def clean_db(connection: Connection, news_list: list, news_type: str):
+    hash_list = [x['hash'] for x in news_list]
+    s = select([news.c.hash]).where(and_(news.c.news_type == news_type, ~news.c.hash.in_(hash_list)))
+    for i in connection.execute(s):
+        d = news.delete().where(news.c.hash == i[0])
+        connection.execute(d)
 
 
 def check_new_receiver():
@@ -50,63 +140,30 @@ def check_new_receiver():
                 requests.get("https://api.telegram.org/bot{}/sendMessage".format(conf.bot_token), params=payload)
 
 
-def get_news():
-    # checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news "
-    #                                                    "WHERE type = 'DISPLAYNACHRICHT'")]
+def send_telegram_message(bot_token: str, receiver_list: list, news_list: list, news_type: str):
+    url = "https://api.telegram.org/bot{}/sendMessage".format(bot_token)
 
-    dn_data = display_news.parse(get_page_contents("https://www.fh-dortmund.de/display"))
-
-    # Forward and store news only if there are no duplicates
-    # if checksum not in checksum_list:
-    #     db.run_query("INSERT INTO news (checksum, title, content, date, type) VALUES (%s, %s, %s, %s, %s)",
-    #                  checksum, str(title), str(data), datetime.today().date(), "DISPLAYNACHRICHT")
-    #     send_telegram_message("**** DISPLAYNACHRICHT ****\n", title, data)
-
-    cn_data = current_news.parse(get_page_contents("https://www.fh-dortmund.de/de/fb/3/studiengaenge/et/aktuelles"
-                                                   "/index.php"))
-
-    for data in cn_data:
-        send_telegram_message("---Aktuelles ET ---", data['title'], data['content'])
-
-    # Forward and store news only if there are no duplicates
-    # if checksum not in checksum_list:
-    #     db.run_query("INSERT INTO news (checksum, title, content, date, type) VALUES (%s, %s, %s, %s, %s)",
-    #                  checksum, str(title), "", datetime.today().date(), "AKTUELLES ET")
-    #     send_telegram_message("**** AKTUELLES ET ****\n", title)
-
-
-    # checksum_list = [i[0] for i in db.run_select_query("SELECT checksum, date FROM news WHERE type = 'AKTUELLES ET'")]
-
-
-def get_page_contents(url):
-    try:
-        r = requests.get(url)
-    except TimeoutError:
-        return None
-    except requests.exceptions.ConnectionError:
-        return None
-    except Exception as e:
-        print(e)
-    if r is None:
-        return None
-    page = BeautifulSoup(r.text, "html.parser")  # Parse html response and store it in the beautifulsoup format
-    return page
-
-
-def send_telegram_message(source, header, content=""):
-    if conf.debug:
-        query = "SELECT id FROM users WHERE debug = 1;"
+    if news_type == 'display':
+        header = "Displaynachricht"
+    elif news_type == 'current':
+        header = "Aktuelles ET"
     else:
-        query = "SELECT id FROM users;"
-    receiver_list = db.run_select_query(query)
+        return
 
-    for receiver in receiver_list:
-        message = source + '\n' + header + '\n' + content
-        url = "https://api.telegram.org/bot{}/sendMessage".format(conf.bot_token)
-        payload = {'text': message, 'chat_id': receiver}
-        requests.get(url, params=payload)
+    for n in news_list:
+        message = f"--- {header} ---\n" \
+                  f"Datum: {n['date']}\n\n" \
+                  f"{n['title']}\n" \
+                  f"{n['content']}"
+
+        for r in receiver_list:
+            requests.get(url, params={'text': message, 'chat_id': r})
 
 
 if __name__ == '__main__':
-    dr = True if '--dry_run' in sys.argv else False
-    main(dry_run=dr)
+    sqlite = True if '--sqlite' in sys.argv else False
+    if '--token' in sys.argv:
+        token = sys.argv[sys.argv.index('--token') + 1]
+    else:
+        token = None
+    main(use_sqlite=sqlite, bot_token=token)

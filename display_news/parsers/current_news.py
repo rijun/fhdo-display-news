@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime
 
 from bs4 import BeautifulSoup
 
@@ -20,7 +21,7 @@ def parse(data: BeautifulSoup) -> list:
             if child == '\n':
                 continue
             if not date and child.name == 'p':
-                date = format_text(child.get_text())
+                date = datetime.strptime(format_text(child.get_text()), '%d.%m.%Y').strftime('%Y-%m-%d')
                 continue
             elif child.name == 'p':
                 content_list.append(format_text(child.get_text().strip()))

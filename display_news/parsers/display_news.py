@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 
 from bs4 import BeautifulSoup
@@ -15,9 +16,9 @@ def parse(data: BeautifulSoup) -> list:
         # Next sibling after headline stores the news content
         content = news_title.find_next(class_='indent').string
         content = ' '.join(content.split())
-        news_hash = hashlib.md5((title + content).encode('utf-8')).hexdigest()
         news.append({
-            'hash': news_hash,
+            'hash': hashlib.md5((title + content).encode('utf-8')).hexdigest(),
+            'date': datetime.date.today(),
             'title': title,
             'content': content
         })
