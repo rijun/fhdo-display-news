@@ -3,7 +3,7 @@ from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
-from sqlalchemy import create_engine, MetaData, Table, Column, String, and_
+from sqlalchemy import create_engine, MetaData, Table, Column, String, Boolean, and_
 from sqlalchemy.engine.base import Connection, Engine
 from sqlalchemy.sql import select, insert, delete
 
@@ -36,7 +36,7 @@ def main(use_sqlite=False, bot_token=None):
         users = Table('users', meta,
                       Column('id', String),
                       Column('name', String),
-                      Column('debug', String)
+                      Column('debug', Boolean)
                       )
         meta.create_all(engine)
     else:
@@ -46,7 +46,7 @@ def main(use_sqlite=False, bot_token=None):
 
     conn = engine.connect()
 
-    # check_new_receiver()
+    check_new_receiver(conn, bot_token)
 
     dn_url = "https://www.fh-dortmund.de/display"
     cn_url = "https://www.fh-dortmund.de/de/fb/3/studiengaenge/et/aktuelles/index.php"
@@ -65,6 +65,35 @@ def main(use_sqlite=False, bot_token=None):
 
     clean_db(conn, dn, 'display')
     clean_db(conn, cn, 'current')
+
+
+def check_new_receiver(connection: Connection, bot_token: str):
+    if bot_token == "DEBUG":
+        return
+
+    r = requests.get(f"https://api.telegram.org/bot{bot_token}/getUpdates")
+    res = r.json()
+
+    if not res:
+        return
+
+    q = select([users.c.id])
+    receiver_list = [int(x[0]) for x in connection.execute(q).fetchall()]
+
+    for item in res['result']:
+        text = item['message']['text']
+        if text == "/abonnieren":
+            sender_id = item['message']['from']['id']
+            if sender_id not in receiver_list:
+                sender = item['message']['from']['first_name']
+                ins = users.insert().values(
+                    id=sender_id,
+                    name=sender,
+                    debug=False
+                )
+                connection.execute(ins)
+                payload = {'text': "Erfolgreich abonniert!", 'chat_id': sender_id}
+                requests.get("https://api.telegram.org/bot{}/sendMessage".format(bot_token), params=payload)
 
 
 def get_page_contents(url):
@@ -108,7 +137,7 @@ def forward_message(connection: Connection, bot_token: str, news_list: list, new
     else:
         q = select([users.c.id])
 
-    receivers = connection.execute(q).fetchall()
+    receivers = [int(x[0]) for x in connection.execute(q).fetchall()]
     send_telegram_message(bot_token, receivers, news_list, news_type)
 
 
@@ -118,26 +147,6 @@ def clean_db(connection: Connection, news_list: list, news_type: str):
     for i in connection.execute(s):
         d = news.delete().where(news.c.hash == i[0])
         connection.execute(d)
-
-
-def check_new_receiver():
-    url = "https://api.telegram.org/bot{}/getUpdates".format(conf.bot_token)
-    r = requests.get(url)
-    res = r.json()
-
-    if not res:
-        return
-
-    receiver_list = db.run_select_query("SELECT id FROM users;")
-    for item in res['result']:
-        text = item['message']['text']
-        if text == "/abonnieren":
-            sender_id = item['message']['from']['id']
-            if sender_id not in receiver_list:
-                sender = item['message']['from']['first_name']
-                db.run_query("INSERT INTO users (id, name) VALUES (%s, %s)", sender_id, sender)
-                payload = {'text': "Erfolgreich abonniert!", 'chat_id': sender_id}
-                requests.get("https://api.telegram.org/bot{}/sendMessage".format(conf.bot_token), params=payload)
 
 
 def send_telegram_message(bot_token: str, receiver_list: list, news_list: list, news_type: str):
@@ -165,5 +174,5 @@ if __name__ == '__main__':
     if '--token' in sys.argv:
         token = sys.argv[sys.argv.index('--token') + 1]
     else:
-        token = None
+        token = "DEBUG"
     main(use_sqlite=sqlite, bot_token=token)
