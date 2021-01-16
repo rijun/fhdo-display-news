@@ -4,7 +4,7 @@ from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
-from sqlalchemy import create_engine, MetaData, Table, Column, String, Boolean, and_
+from sqlalchemy import create_engine, MetaData, Table, Column, CHAR, Date, String, Integer, Boolean, and_
 from sqlalchemy.engine.base import Connection, Engine
 from sqlalchemy.sql import select, insert, delete
 
@@ -18,7 +18,7 @@ news: Table
 users: Table
 
 
-def main(use_sqlite=False):
+def main():
     global engine
     global news
     global users
@@ -26,34 +26,19 @@ def main(use_sqlite=False):
     bot_token = configuration.bot_settings['token']
     if bot_token is None:
         logging.error("Bot token not supplied. Use --token option if debugging.")
-        exit(-1)
+        return -1
 
-    if use_sqlite:
-        engine = create_engine('sqlite:///database.db', echo=True)
-        news = Table('news', meta,
-                     Column('hash', String),
-                     Column('news_date', String),
-                     Column('title', String),
-                     Column('content', String),
-                     Column('news_type', String)
-                     )
-        users = Table('users', meta,
-                      Column('id', String),
-                      Column('name', String),
-                      Column('debug', Boolean)
-                      )
-        meta.create_all(engine)
-    else:
-        engine = create_engine(
-            f"mysql+pymsql://"
-            f"{configuration.sql_settings['user']}:"
-            f"{configuration.sql_settings['passwd']}@"
-            f"{configuration.sql_settings['host']}/"
-            f"{configuration.sql_settings['dbname']}?"
-            f"charset=utf8mb4"
-        )
-        news = Table('news', meta, autoload=True, autoload_with=engine)
-        users = Table('users', meta, autoload=True, autoload_with=engine)
+    engine = create_engine(
+        f"mysql+pymysql://"
+        f"{configuration.sql_settings['user']}:"
+        f"{configuration.sql_settings['passwd']}@"
+        f"{configuration.sql_settings['host']}/"
+        f"{configuration.sql_settings['dbname']}"
+        f"?charset=utf8mb4"
+    )
+
+    news = Table('news', meta, autoload=True, autoload_with=engine)
+    users = Table('users', meta, autoload=True, autoload_with=engine)
 
     conn = engine.connect()
 
@@ -103,6 +88,7 @@ def check_new_receiver(connection: Connection, bot_token: str):
                     debug=False
                 )
                 connection.execute(ins)
+                receiver_list.append(sender_id)
                 payload = {'text': "Erfolgreich abonniert!", 'chat_id': sender_id}
                 requests.get("https://api.telegram.org/bot{}/sendMessage".format(bot_token), params=payload)
 
@@ -184,7 +170,6 @@ def send_telegram_message(bot_token: str, receiver_list: list, news_list: list, 
 
 
 if __name__ == '__main__':
-    sqlite = True if '--sqlite' in sys.argv else False
     if '--token' in sys.argv:
         configuration.bot_settings['token'] = "DEBUG"
-    main(use_sqlite=sqlite)
+    exit(main())
