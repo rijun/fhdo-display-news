@@ -171,13 +171,16 @@ def send_telegram_message(bot_token: str, receiver_list: list, news_list: list, 
         return
 
     for n in news_list:
-        message = f"--- {header} ---\n" \
-                  f"Datum: {n['date']}\n\n" \
-                  f"{n['title']}\n" \
+        message = f"---- {header} ----\n" \
+                  f"<i>Datum: {n['date'].strftime('%d.%m.%Y')}</i>\n\n" \
+                  f"<b>{n['title']}</b>\n\n" \
                   f"{n['content']}"
 
-        for r in receiver_list:
-            requests.get(url, params={'text': message, 'chat_id': r})
+        for recv in receiver_list:
+            r = requests.get(url, params={'text': message, 'chat_id': recv, 'parse_mode': 'HTML'})
+            if r.status_code != 200:
+                logging.warning("Status code: %s", r.status_code)
+                logging.warning("Description: %s\n", r.content)
 
 
 if __name__ == '__main__':
