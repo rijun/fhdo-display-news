@@ -2,7 +2,7 @@ import configparser
 import logging
 import pathlib
 
-CONFIG_PATH = "../config.ini"
+CONFIG_PATH = "./config.ini"
 
 
 class Configuration:
