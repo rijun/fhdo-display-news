@@ -1,3 +1,4 @@
+import logging
 import sys
 from datetime import datetime
 
@@ -7,11 +8,9 @@ from sqlalchemy import create_engine, MetaData, Table, Column, String, Boolean, 
 from sqlalchemy.engine.base import Connection, Engine
 from sqlalchemy.sql import select, insert, delete
 
-from display_news import config
+from display_news import configuration
 from display_news.parsers import current_news, display_news
 
-
-# conf = config.Config()
 
 meta = MetaData()
 engine: Engine
@@ -19,10 +18,15 @@ news: Table
 users: Table
 
 
-def main(use_sqlite=False, bot_token=None):
+def main(use_sqlite=False):
     global engine
     global news
     global users
+
+    bot_token = configuration.bot_settings['token']
+    if bot_token is None:
+        logging.error("Bot token not supplied. Use --token option if debugging.")
+        exit(-1)
 
     if use_sqlite:
         engine = create_engine('sqlite:///database.db', echo=True)
@@ -40,7 +44,14 @@ def main(use_sqlite=False, bot_token=None):
                       )
         meta.create_all(engine)
     else:
-        engine = create_engine()
+        engine = create_engine(
+            f"mysql+pymsql://"
+            f"{configuration.sql_settings['user']}:"
+            f"{configuration.sql_settings['passwd']}@"
+            f"{configuration.sql_settings['host']}/"
+            f"{configuration.sql_settings['dbname']}?"
+            f"charset=utf8mb4"
+        )
         news = Table('news', meta, autoload=True, autoload_with=engine)
         users = Table('users', meta, autoload=True, autoload_with=engine)
 
@@ -172,7 +183,5 @@ def send_telegram_message(bot_token: str, receiver_list: list, news_list: list, 
 if __name__ == '__main__':
     sqlite = True if '--sqlite' in sys.argv else False
     if '--token' in sys.argv:
-        token = sys.argv[sys.argv.index('--token') + 1]
-    else:
-        token = "DEBUG"
-    main(use_sqlite=sqlite, bot_token=token)
+        configuration.bot_settings['token'] = "DEBUG"
+    main(use_sqlite=sqlite)

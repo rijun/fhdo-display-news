@@ -2,7 +2,7 @@
 host =
 user =
 passwd =
-db =
+dbname =
 
 [bot]
 token =
