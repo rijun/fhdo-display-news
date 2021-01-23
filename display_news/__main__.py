@@ -1,34 +1,21 @@
 import logging
 import sys
-from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
-from sqlalchemy import create_engine, MetaData, Table, Column, CHAR, Date, String, Integer, Boolean, and_
-from sqlalchemy.engine.base import Connection, Engine
-from sqlalchemy.sql import select, insert, delete
+from sqlalchemy import create_engine, sql
 
 from display_news import configuration
 from display_news.parsers import current_news, display_news
 
 
-meta = MetaData()
-engine: Engine
-news: Table
-users: Table
-
-
 def main():
-    global engine
-    global news
-    global users
-
     bot_token = configuration.bot_settings['token']
     if bot_token is None:
         logging.error("Bot token not supplied. Use --token option if debugging.")
         return -1
 
-    engine = create_engine(
+    database = create_engine(
         f"mysql+pymysql://"
         f"{configuration.sql_settings['user']}:"
         f"{configuration.sql_settings['passwd']}@"
@@ -37,12 +24,7 @@ def main():
         f"?charset=utf8mb4"
     )
 
-    news = Table('news', meta, autoload=True, autoload_with=engine)
-    users = Table('users', meta, autoload=True, autoload_with=engine)
-
-    conn = engine.connect()
-
-    check_new_receiver(conn, bot_token)
+    check_receiver_change(database, bot_token)
 
     dn_url = "https://www.fh-dortmund.de/display"
     cn_url = "https://www.fh-dortmund.de/de/fb/3/studiengaenge/et/aktuelles/index.php"
@@ -50,22 +32,26 @@ def main():
     dn = display_news.parse(get_page_contents(dn_url))
     cn = current_news.parse(get_page_contents(cn_url))
 
-    dn_filtered = filter_news(conn, dn, 'display')
-    cn_filtered = filter_news(conn, cn, 'current')
+    dn_filtered = filter_news(database, dn, 'display')
+    cn_filtered = filter_news(database, cn, 'current')
 
-    store_news(conn, dn_filtered, 'display')
-    store_news(conn, cn_filtered, 'current')
+    store_news(database, dn_filtered, 'display')
+    store_news(database, cn_filtered, 'current')
 
-    forward_message(conn, bot_token, dn_filtered, 'display')
-    forward_message(conn, bot_token, cn_filtered, 'current')
+    forward_message(database, bot_token, dn_filtered, 'display')
+    forward_message(database, bot_token, cn_filtered, 'current')
 
-    clean_db(conn, dn, 'display')
-    clean_db(conn, cn, 'current')
+    clean_db(database, dn, 'display')
+    clean_db(database, cn, 'current')
 
 
-def check_new_receiver(connection: Connection, bot_token: str):
+def check_receiver_change(engine, bot_token):
+    """Check if a new receiver has subscribed or if a existing receiver has unsubscribed, and then add or remove them
+    from the database."""
     if bot_token == "DEBUG":
         return
+
+    receiver_list = [int(x[0]) for x in engine.execute(sql.text("SELECT id FROM users"))]
 
     r = requests.get(f"https://api.telegram.org/bot{bot_token}/getUpdates")
     res = r.json()
@@ -73,27 +59,29 @@ def check_new_receiver(connection: Connection, bot_token: str):
     if not res:
         return
 
-    q = select([users.c.id])
-    receiver_list = [int(x[0]) for x in connection.execute(q).fetchall()]
-
     for item in res['result']:
         text = item['message']['text']
-        if text == "/abonnieren":
-            sender_id = item['message']['from']['id']
+        sender_id = item['message']['from']['id']
+        if text == "/start":
             if sender_id not in receiver_list:
                 sender = item['message']['from']['first_name']
-                ins = users.insert().values(
-                    id=sender_id,
-                    name=sender,
-                    debug=False
-                )
-                connection.execute(ins)
+                query = sql.text("INSERT INTO users VALUES (:sender_id, :sender_name, :debug)")
+                engine.execute(query, sender_id, sender, False)
                 receiver_list.append(sender_id)
                 payload = {'text': "Erfolgreich abonniert!", 'chat_id': sender_id}
+                requests.get("https://api.telegram.org/bot{}/sendMessage".format(bot_token), params=payload)
+        elif text == "/stop":
+            if sender_id not in receiver_list:
+                sender = item['message']['from']['first_name']
+                query = sql.text("DELETE FROM users VALUES WHERE id = :sender_id")
+                engine.execute(query, sender_id, sender, False)
+                receiver_list.remove(sender_id)
+                payload = {'text': "Erfolgreich entabonniert!", 'chat_id': sender_id}
                 requests.get("https://api.telegram.org/bot{}/sendMessage".format(bot_token), params=payload)
 
 
 def get_page_contents(url):
+    """Get the HTML text from the web page passed via the URL parameter and return a BeautifulSoup object."""
     r = None
     try:
         r = requests.get(url)
@@ -109,44 +97,56 @@ def get_page_contents(url):
     return page
 
 
-def filter_news(connection: Connection, news_list: list, news_type: str) -> list:
-    s = select([news.c.hash]).where(news.c.news_type == news_type)
-    news_in_db = [i[0] for i in connection.execute(s)]
+def filter_news(engine, news_list, news_type):
+    """Filter out news which is already present in the database."""
+    query = sql.text("SELECT hash FROM news WHERE news_type = :news_type")
+    data = {
+        'news_type': news_type
+    }
+    news_in_db = [i[0] for i in engine.execute(query, data)]
     filtered_news = [i for i in news_list if i['hash'] not in news_in_db]
     return filtered_news
 
 
-def store_news(connection: Connection, news_list: list, news_type: str):
+def store_news(engine, news_list, news_type):
+    """Store news in the database."""
     for n in news_list:
-        ins = news.insert().values(
-            hash=n['hash'],
-            news_date=n['date'],
-            title=n['title'],
-            content=n['content'],
-            news_type=news_type
-        )
-        connection.execute(ins)
+        query = sql.text("INSERT INTO news VALUES (:hash, :news_date, :title, :content, :news_type)")
+        data = {
+            'hash': n['hash'],
+            'news_date': n['date'],
+            'title': n['title'],
+            'content': n['content'],
+            'news_type': news_type
+        }
+        engine.execute(query, data)
 
 
-def forward_message(connection: Connection, bot_token: str, news_list: list, news_type: str, debug=False):
+def forward_message(engine, bot_token, news_list, news_type, debug=False):
+    """Forward news to each receiver."""
     if debug:
-        q = select([users.c.id]).where(users.c.debug == 1)
+        query = sql.text("SELECT id FROM users WHERE debug is TRUE")
     else:
-        q = select([users.c.id])
+        query = sql.text("SELECT id FROM users")
 
-    receivers = [int(x[0]) for x in connection.execute(q).fetchall()]
+    receivers = [int(x[0]) for x in engine.execute(query)]
     send_telegram_message(bot_token, receivers, news_list, news_type)
 
 
-def clean_db(connection: Connection, news_list: list, news_type: str):
+def clean_db(engine, news_list, news_type):
+    """Remove news which is not available anymore on the website."""
     hash_list = [x['hash'] for x in news_list]
-    s = select([news.c.hash]).where(and_(news.c.news_type == news_type, ~news.c.hash.in_(hash_list)))
-    for i in connection.execute(s):
-        d = news.delete().where(news.c.hash == i[0])
-        connection.execute(d)
+    data = {
+        'hash_list': hash_list,
+        'news_type': news_type
+    }
+    query = sql.text("SELECT hash FROM news WHERE hash NOT IN :hash_list AND news_type = :news_type")
+    for i in engine.execute(query, data):
+        engine.execute(sql.text("DELETE FROM news WHERE hash = :hash"), {'hash': i[0]})
 
 
-def send_telegram_message(bot_token: str, receiver_list: list, news_list: list, news_type: str):
+def send_telegram_message(bot_token, receiver_list, news_list, news_type):
+    """Format news and send it via a telegram bot."""
     url = "https://api.telegram.org/bot{}/sendMessage".format(bot_token)
 
     if news_type == 'display':
@@ -157,7 +157,7 @@ def send_telegram_message(bot_token: str, receiver_list: list, news_list: list, 
         return
 
     for n in news_list:
-        message = f"---- {header} ----\n" \
+        message = f"++++ {header} ++++\n" \
                   f"<i>Datum: {n['date'].strftime('%d.%m.%Y')}</i>\n\n" \
                   f"<b>{n['title']}</b>\n\n" \
                   f"{n['content']}"
